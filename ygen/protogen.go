@@ -516,6 +516,18 @@ func genProto3MsgCode(pkg string, msgDefs []*protoMsg, pathComment bool) (*gener
 // as a protoMsgConfig struct. The parentPkg argument specifies the name of the parent
 // package for the protobuf message(s) that are being generated, such that relative
 // paths can be used in the messages.
+func modifyFieldTag(fields []*protoMsgField, tag uint32) uint32 {
+	for _, f := range fields {
+		f.Tag = tag + 1
+		tag++
+
+		if f.IsOneOf {
+			tag = modifyFieldTag(f.OneOfFields, tag)
+		}
+	}
+	return tag
+}
+
 func genProto3Msg(msg *Directory, msgs map[string]*Directory, protogen *protoGenState, cfg *protoMsgConfig, parentPkg string, childMsgs []*generatedProto3Message, useDefiningModuleForTypedefEnumNames, useConsistentNamesForProtoUnionEnums bool) ([]*protoMsg, util.Errors) {
 	var errs util.Errors
 
@@ -543,24 +555,19 @@ func genProto3Msg(msg *Directory, msgs map[string]*Directory, protogen *protoGen
 	if util.IsKeyedList(msg.Entry) {
 		skipFields = util.ListKeyFieldsMap(msg.Entry)
 	}
+	var ctags uint32 = 1
 	for _, name := range fNames {
 		// Skip fields that we are explicitly not asked to include.
 		if _, ok := skipFields[name]; ok {
 			continue
 		}
 
+		var err error
 		field := msg.Fields[name]
-
 		fieldDef := &protoMsgField{
 			Name: genutil.MakeNameUnique(safeProtoIdentifierName(name), definedFieldNames),
 		}
-
-		t, err := protoTagForEntry(field)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("proto: could not generate tag for field %s: %v", field.Name, err))
-			continue
-		}
-		fieldDef.Tag = t
+		fieldDef.Tag = ctags
 
 		defArgs := &protoDefinitionArgs{
 			field:              field,
@@ -596,6 +603,9 @@ func genProto3Msg(msg *Directory, msgs map[string]*Directory, protogen *protoGen
 				continue
 			}
 			addNewKeys(imports, lImports)
+			if fieldDef.IsOneOf {
+				ctags = modifyFieldTag(fieldDef.OneOfFields, ctags)
+			}
 			if repeatedMsg != nil {
 				msgDefs = append(msgDefs, repeatedMsg)
 			}
@@ -620,6 +630,7 @@ func genProto3Msg(msg *Directory, msgs map[string]*Directory, protogen *protoGen
 			continue
 		}
 		msgDef.Fields = append(msgDef.Fields, fieldDef)
+		ctags++
 	}
 
 	msgDef.Imports = stringKeys(imports)
@@ -988,6 +999,7 @@ func protoLeafDefinition(leafName string, args *protoDefinitionArgs, useDefining
 		d.enums[d.protoType] = e
 	case util.IsEnumeratedType(args.field.Type):
 		d.globalEnum = true
+
 	case protoType.UnionTypes != nil:
 		u, err := unionFieldToOneOf(leafName, args.field, protoType, args.cfg.annotateEnumNames, useDefiningModuleForTypedefEnumNames, useConsistentNamesForProtoUnionEnums)
 		if err != nil {
@@ -1164,6 +1176,10 @@ func genListKeyProto(listPackage string, listName string, args *protoDefinitionA
 			if err != nil {
 				return nil, fmt.Errorf("error generating type for union list key %s in list %s", k, args.field.Path())
 			}
+			for _, f := range u.repeatedMsg.Fields {
+				f.Tag = ctag + 1
+				ctag++
+			}
 			fd.OneOfFields = append(fd.OneOfFields, u.oneOfFields...)
 			for n, e := range u.enums {
 				km.Enums[n] = e
@@ -1295,14 +1311,14 @@ func unionFieldToOneOf(fieldName string, e *yang.Entry, mtype *MappedType, annot
 		// such that we have unique inputs for each option. We make the name lower-case
 		// as it is conventional that protobuf field names are lowercase separated by
 		// underscores.
-		ft, err := fieldTag(fmt.Sprintf("%s_%s", e.Path(), strings.ToLower(tn)))
-		if err != nil {
-			return nil, fmt.Errorf("could not calculate tag number for %s, type %s in oneof", e.Path(), tn)
-		}
+		//ft, err := fieldTag(fmt.Sprintf("%s_%s", e.Path(), strings.ToLower(tn)))
+		//if err != nil {
+		//	return nil, fmt.Errorf("could not calculate tag number for %s, type %s in oneof", e.Path(), tn)
+		//}
 		st := &protoMsgField{
 			Name: fmt.Sprintf("%s_%s", fieldName, strings.ToLower(tn)),
 			Type: t,
-			Tag:  ft,
+			Tag:  0,
 		}
 		oofs = append(oofs, st)
 	}
