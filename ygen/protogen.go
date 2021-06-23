@@ -1176,9 +1176,16 @@ func genListKeyProto(listPackage string, listName string, args *protoDefinitionA
 			if err != nil {
 				return nil, fmt.Errorf("error generating type for union list key %s in list %s", k, args.field.Path())
 			}
-			for _, f := range u.repeatedMsg.Fields {
-				f.Tag = ctag + 1
-				ctag++
+			if u.repeatedMsg != nil {
+				for _, f := range u.repeatedMsg.Fields {
+					f.Tag = ctag + 1
+					ctag++
+				}
+			} else {
+				for _, f := range u.oneOfFields {
+					f.Tag = ctag + 1
+					ctag++
+				}
 			}
 			fd.OneOfFields = append(fd.OneOfFields, u.oneOfFields...)
 			for n, e := range u.enums {
